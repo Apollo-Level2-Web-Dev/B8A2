@@ -465,12 +465,7 @@
 Your project must strictly follow the **feature-based layered architecture** (`route` → `controller` → `service` → `repository`):
 
 ```text
-.
-├── schema.sql
-├── .env.example
 ├── README.md
-├── package.json
-├── tsconfig.json
 └── src/
     ├── app.ts
     ├── server.ts
