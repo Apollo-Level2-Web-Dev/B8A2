@@ -2,7 +2,7 @@
 
 > **Event & Ticket Booking Platform**
 >
-> *A scalable, modular backend platform for managing community events, ticket reservations, seat allocations, dynamic pricing, role-based event organization, and organizer analytics.*
+> *A scalable, modular backend platform for managing community events, ticket reservations with seat-count inventory, and role-based event organization.*
 
 ---
 
@@ -10,18 +10,18 @@
 
 | Technology / Concept | Requirement & Note |
 | :--- | :--- |
-| **Node.js** | LTS runtime (20.x / 24.x or higher) |
-| **TypeScript** | Strict mode enabled (`noImplicitAny`), latest stable version |
-| **Express.js** | Feature-based (modular) & Layered architecture (`route` → `controller` → `service` → `repository`) |
-| **Express Version** | **Express 5.x** (Native support for async error catching without repetitive try/catch wrappers or explicit `catchAsync` wrappers) |
-| **PostgreSQL** | Relational database using native `pg` (`Pool`) driver only. **No ORMs (Prisma/TypeORM) or Query Builders (Knex) allowed.** |
-| **Raw SQL & Transactions** | Parameterized queries (`pool.query($1, $2)`) mandatory for every database operation to completely prevent SQL injection. Transactions (`BEGIN`, `COMMIT`, `ROLLBACK`) and row-level concurrency control (`SELECT ... FOR UPDATE`) must be handled inside the **Service layer** using a dedicated client acquired via `pool.connect()`. |
+| **Node.js** | LTS runtime (22.x or 24.x) |
+| **TypeScript** | Strict mode enabled (`strict: true`, which includes `noImplicitAny`), latest stable version |
+| **Express.js** | Feature-based (modular) & Layered architecture (`route` → `controller` → `service` → `repository`). The repository layer is **mandatory** and is the only layer that runs SQL. |
+| **Express Version** | **Express 5.x** |
+| **PostgreSQL** | Relational database using native `pg` (`Pool`) driver. **No ORMs allowed.** |
+| **Raw SQL** | Parameterized queries (`pool.query($1, $2)`) mandatory for every database operation to completely prevent SQL injection. Never concatenate user input into SQL (for `ORDER BY`, map the `sort` value through a whitelist). |
 | **bcrypt** | Password hashing (salt rounds between 8 and 12) |
 | **jsonwebtoken** | JWT generation & verification |
-| **Zod** | Request body and query parameter validation via custom validation middleware |
+| **Zod** | Request body, query parameter and path parameter validation via custom validation middleware |
 | **Error Handling** | Centralized error-handling middleware utilizing a custom `AppError` class |
 
-> 📌 **Note on Record IDs:** Identifiers (`id`) across all tables can be implemented as either auto-incrementing serial integers (`SERIAL PRIMARY KEY`) or standard UUIDs/CUIDs.
+> 📌 **Note on Record IDs:** Identifiers (`id`) across all tables can be implemented as either auto-incrementing serial integers or standard UUIDs/CUIDs. Pick one and use it consistently. The examples below use integers.
 
 ---
 
@@ -29,62 +29,80 @@
 
 | Role | Allowed Actions |
 | :--- | :--- |
-| **attendee** | • Register and log in<br>• Browse, search, and filter published events<br>• Book tickets for events (with automatic available seat validation & price calculation)<br>• View own booking history & cancel bookings |
-| **organizer** | • All attendee permissions<br>• Create, update, and delete their own organized events<br>• View all ticket bookings across their specific organized events |
+| **attendee** | • Register and log in<br>• Browse, search, and filter events (all events are publicly visible; there is no draft/published state)<br>• Book tickets for events (with automatic available seat validation & price calculation)<br>• View own booking history & cancel own bookings |
+| **organizer** | • All attendee permissions, **except** booking tickets for their own events (rejected with `403`)<br>• Create, update, and delete their own organized events |
 
 ---
 
 ## 🗄️ Database Schema Design
 
+*Note: Primary keys (`id`) can be auto-incrementing integers or standard UUIDs/CUIDs.*
+
 ### Table 1: `users`
-| Field | Data Type / Constraint | Description / Rule |
+| Field | Constraint / Rules | Description |
 | :--- | :--- | :--- |
-| `id` | `SERIAL PRIMARY KEY` / UUID | Unique identifier for each account |
-| `name` | `VARCHAR(150) NOT NULL` | Full display name of the user |
-| `email` | `VARCHAR(150) UNIQUE NOT NULL` | Unique login email address |
-| `password` | `VARCHAR(255) NOT NULL` | Hashed password string (**never returned in responses**) |
-| `role` | `VARCHAR(30) DEFAULT 'attendee' NOT NULL` | Access control role (`attendee` or `organizer`) |
-| `created_at` | `TIMESTAMP DEFAULT NOW()` | Account creation timestamp |
-| `updated_at` | `TIMESTAMP DEFAULT NOW()` | Last update timestamp |
+| `id` | Primary Key | Unique identifier for each account |
+| `name` | Required | Full display name of the user |
+| `email` | Unique, Required | Unique login email address |
+| `password` | Required | Hashed password string (**never returned in responses**) |
+| `role` | Default: `attendee`, Required, must be `attendee` or `organizer` | Access control role |
+| `created_at` | Auto Timestamp | Account creation timestamp |
+| `updated_at` | Auto Timestamp | Last update timestamp |
 
 ### Table 2: `events`
-| Field | Data Type / Constraint | Description / Rule |
+| Field | Constraint / Rules | Description |
 | :--- | :--- | :--- |
-| `id` | `SERIAL PRIMARY KEY` / UUID | Unique identifier for each event |
-| `title` | `VARCHAR(200) NOT NULL` | Headline title of the event |
-| `description` | `TEXT NOT NULL` | Detailed description of the event |
-| `category` | `VARCHAR(100) NOT NULL` | Category tag (e.g., `tech`, `music`, `workshop`, `sports`) |
-| `date` | `TIMESTAMP NOT NULL` | Scheduled future date and time |
-| `location` | `VARCHAR(255) NOT NULL` | Venue location or online link |
-| `total_seats` | `INTEGER NOT NULL` | Maximum ticket capacity |
-| `available_seats` | `INTEGER NOT NULL` | Current available seats (initialized equal to `total_seats` on create) |
-| `price` | `DECIMAL(10, 2) NOT NULL DEFAULT 0.00` | Price per single ticket |
-| `organizer_id` | `INTEGER REFERENCES users(id) ON DELETE CASCADE` | Foreign key referencing the organizer |
-| `created_at` | `TIMESTAMP DEFAULT NOW()` | Event creation timestamp |
-| `updated_at` | `TIMESTAMP DEFAULT NOW()` | Event update timestamp |
+| `id` | Primary Key | Unique identifier for each event |
+| `title` | Required | Headline title of the event |
+| `description` | Required | Detailed description of the event |
+| `category` | Required | Category tag (e.g., `tech`, `music`, `workshop`) |
+| `date` | Required | Scheduled date and time |
+| `location` | Required | Venue location or online link |
+| `total_seats` | Required, must be greater than 0 | Maximum ticket capacity |
+| `available_seats` | Required, never below 0 and never above `total_seats` | Current available seats (initialized equal to `total_seats` on create; recalculated on updates, see Update Event) |
+| `price` | Required, must be 0 or greater, decimal with 2 places | Price per single ticket |
+| `organizer_id` | Foreign Key (References `users.id`), Required | Links the event to the organizing user |
+| `created_at` | Auto Timestamp | Event creation timestamp |
+| `updated_at` | Auto Timestamp | Event update timestamp |
 
 ### Table 3: `bookings`
-| Field | Data Type / Constraint | Description / Rule |
+| Field | Constraint / Rules | Description |
 | :--- | :--- | :--- |
-| `id` | `SERIAL PRIMARY KEY` / UUID | Unique identifier for each booking |
-| `event_id` | `INTEGER REFERENCES events(id) ON DELETE CASCADE` | Foreign key referencing the booked event |
-| `attendee_id` | `INTEGER REFERENCES users(id) ON DELETE CASCADE` | Foreign key referencing the booking user |
-| `tickets_booked` | `INTEGER NOT NULL` | Number of seats reserved (1 to 10 max per request) |
-| `total_price` | `DECIMAL(10, 2) NOT NULL` | Automatically calculated as `tickets_booked * event.price` |
-| `status` | `VARCHAR(20) DEFAULT 'confirmed' NOT NULL` | Booking state (`confirmed` or `cancelled`) |
-| `created_at` | `TIMESTAMP DEFAULT NOW()` | Booking creation timestamp |
-| `updated_at` | `TIMESTAMP DEFAULT NOW()` | Booking update timestamp |
+| `id` | Primary Key | Unique identifier for each booking |
+| `event_id` | Foreign Key (References `events.id`), Required | Links the booking to the event. Cancelled bookings are removed together with their event (cascade delete). Events with confirmed bookings cannot be deleted. |
+| `attendee_id` | Foreign Key (References `users.id`), Required | Links the booking to the attending user |
+| `tickets_booked` | Required, must be greater than 0 | Number of seats reserved |
+| `total_price` | Required, decimal with 2 places | Automatically calculated as `tickets_booked * event.price` |
+| `status` | Default: `confirmed`, Required, must be `confirmed` or `cancelled` | Booking state |
+| `created_at` | Auto Timestamp | Booking creation timestamp |
+| `updated_at` | Auto Timestamp | Booking update timestamp |
+
+> 🕒 **Timestamps:** `created_at` and `updated_at` are set automatically on insert. `updated_at` must also be refreshed whenever a record is updated (event update, booking cancel, seat changes).
+
+> 💡 **Database integrity:** Enforce the rules above at the database level too, using `CHECK`, `UNIQUE`, `NOT NULL` and foreign key constraints, in addition to your application checks.
 
 ---
 
-## 🌐 API Endpoints Specification (11 Endpoints)
+## 🔐 Authentication Rules
+
+* **JWT payload:** `{ "id": <user id>, "role": "<role>" }`.
+* **Environment variables:** `DATABASE_URL`, `JWT_SECRET`, `JWT_EXPIRES_IN` (e.g. `7d`), `PORT`.
+* **Header:** every protected endpoint expects the token in the `Authorization` header. The auth middleware must accept both `Authorization: Bearer <JWT_TOKEN>` and `Authorization: <JWT_TOKEN>`.
+* Missing, malformed, expired or invalid token → `401`.
+* Valid token but wrong role → `403`.
+* **`req.user`:** after verifying the token, the auth middleware attaches the decoded payload (`id`, `role`) to `req.user`. Since Express's `Request` type has no `user` property, extend the type once (for example with a TypeScript declaration file) so `req.user` compiles under strict mode.
+* For endpoints that use a resource id (`:id`), check that the resource exists first (`404`), then check ownership/permission (`403`).
+
+---
+
+## 🌐 API Endpoints Specification (10 Endpoints)
 
 ### 🔹 Authentication Module
 
 #### 1. User Registration
 * **Endpoint:** `POST /api/v1/auth/signup`
 * **Access:** Public
-* **Request Body (Zod Validated):**
+* **Request Body (Zod Validated):** `role` is optional and defaults to `attendee` when omitted. Only `attendee` and `organizer` are accepted.
   ```json
   {
     "name": "Sarah Connor",
@@ -108,6 +126,7 @@
     }
   }
   ```
+* **Error Cases:** `400` validation failure · `409` email already registered
 
 #### 2. User Login
 * **Endpoint:** `POST /api/v1/auth/login`
@@ -135,10 +154,13 @@
     }
   }
   ```
+* **Error Cases:** `400` validation failure · `401` invalid email or password (use the same message for both cases)
 
 ---
 
 ### 🔹 Events Module
+
+> 📌 **Canonical event shape:** every endpoint that returns an event uses the same fields: `id, title, description, category, date, location, total_seats, available_seats, price, organizer_id, created_at, updated_at`. `price` and other decimal values are returned as **strings** with 2 decimals (the default `pg` behavior for `NUMERIC`), while request bodies send `price` as a **number**.
 
 #### 3. Create Event
 * **Endpoint:** `POST /api/v1/events`
@@ -177,7 +199,8 @@
     }
   }
   ```
-  > 💡 **Developer Hint:** Extract `organizer_id` securely from the decoded JWT token (`req.user.id`). Initialize `available_seats = total_seats`.
+  > 💡 **Developer Hint:** Extract `organizer_id` securely from the decoded JWT token (`req.user.id`), never from the request body. Initialize `available_seats = total_seats`.
+* **Error Cases:** `400` validation failure · `401` missing/invalid token · `403` caller is not an organizer
 
 #### 4. Get All Events (Search, Filter, Sort & Pagination)
 * **Endpoint:** `GET /api/v1/events?search=TypeScript&category=tech&sort=newest&page=1&limit=10`
@@ -185,9 +208,10 @@
 * **Query Parameters & Rules:**
   * `search`: Case-insensitive partial match (`ILIKE`) on `title` or `description`.
   * `category`: Exact match filter.
-  * `sort`: Allowed values: `newest` (default), `oldest`, `price_asc`, `price_desc`.
-  * `page`: Integer page number (default `1`).
-  * `limit`: Integer records per page (default `10`, max `50`).
+  * `sort`: Allowed values: `newest` (default, by `created_at` descending), `oldest`, `price_asc`, `price_desc`. Any other value returns `400`.
+  * `page`: Integer page number, 1 or greater (default `1`). Invalid value returns `400`.
+  * `limit`: Integer records per page, 1 to 50 (default `10`). Out-of-range value returns `400` (no silent clamping).
+  * Add a secondary sort on `id` so pagination order is stable.
 * **Success Response (200 OK):**
   ```json
   {
@@ -216,6 +240,8 @@
     ]
   }
   ```
+  > 💡 `meta.total` is the count of **all** rows matching the filters (not just the current page). An empty result returns `200` with `"data": []`.
+* **Error Cases:** `400` invalid query parameter
 
 #### 5. Get Single Event by ID
 * **Endpoint:** `GET /api/v1/events/:id`
@@ -235,6 +261,7 @@
       "total_seats": 50,
       "available_seats": 50,
       "price": "1500.00",
+      "organizer_id": 1,
       "organizer": {
         "id": 1,
         "name": "Sarah Connor",
@@ -246,10 +273,12 @@
   }
   ```
   > 💡 **Developer Hint:** Use a SQL `JOIN` or execute a secondary query to embed the `organizer` object inside the response data.
+* **Error Cases:** `400` invalid id · `404` event not found
 
 #### 6. Update Event
 * **Endpoint:** `PATCH /api/v1/events/:id`
-* **Access:** Protected (`organizer` role who created the event)
+* **Access:** Protected (`organizer` role who created the event; any other user gets `403`)
+* **Updatable fields:** `title`, `description`, `category`, `date`, `location`, `total_seats`, `price` (at least one required).
 * **Request Body:**
   ```json
   {
@@ -257,8 +286,14 @@
     "total_seats": 60
   }
   ```
-  > ⚠️ **Business Rule (Seat Adjustment):** If `total_seats` is updated, adjust `available_seats` proportionally based on current active bookings to prevent negative seat counts or inventory corruption.
-* **Success Response (200 OK):**
+  > 💡 **Developer Hint:** Only the fields present in the request body should be changed. Build the `SET` part of your `UPDATE` query dynamically from the provided fields, and keep every value parameterized (`$1, $2, ...`). Never insert user input directly into the SQL text.
+  >
+  > ⚠️ **Business Rule (Seat Adjustment):** Count the confirmed tickets already sold for the event (the sum of `tickets_booked` for its bookings with status `confirmed`). When `total_seats` is updated, set `available_seats = new_total_seats - sold`. If `total_seats` is not part of the request, `available_seats` stays unchanged. If that value would be negative (the new total is lower than the tickets already sold), reject with `400 Bad Request`.
+  >
+  > *Example:* an event has 50 seats and 10 are sold. Updating `total_seats` to 60 gives `available_seats = 50`.
+  >
+  > Changing `price` affects only future bookings. Existing bookings keep their original `total_price`.
+* **Success Response (200 OK):** *(the example assumes no tickets have been sold yet)*
   ```json
   {
     "success": true,
@@ -279,11 +314,12 @@
     }
   }
   ```
+* **Error Cases:** `400` validation failure / empty body / `total_seats` below tickets sold · `401` · `403` not the owner · `404` event not found
 
 #### 7. Delete Event
 * **Endpoint:** `DELETE /api/v1/events/:id`
 * **Access:** Protected (`organizer` role who created the event)
-* **Business Rule:** Before deleting, check if there are any active confirmed bookings for the event. If active bookings exist, prohibit deletion and return `400 Bad Request` to preserve booking history.
+* **Business Rule:** Before deleting, check whether the event has any bookings with status `confirmed`. If any exist, prohibit deletion and return `400 Bad Request` to preserve booking history. Otherwise delete the event. Any remaining `cancelled` bookings of that event are removed together with it (cascade delete).
 * **Success Response (200 OK):**
   ```json
   {
@@ -292,10 +328,11 @@
     "data": null
   }
   ```
+* **Error Cases:** `400` event has confirmed bookings · `401` · `403` not the owner · `404` event not found
 
 ---
 
-### 🔹 Bookings & Organizer Module
+### 🔹 Bookings Module
 
 #### 8. Book Event Tickets
 * **Endpoint:** `POST /api/v1/bookings`
@@ -307,14 +344,13 @@
     "tickets_booked": 2
   }
   ```
-* **Concurrency & Transaction Business Rules:**
-  1. Acquire a transaction client from the pool (`const client = await pool.connect()`).
-  2. Run `BEGIN`.
-  3. Query the event with row-level locking (`SELECT * FROM events WHERE id = $1 FOR UPDATE`). If not found, return `404 Not Found`.
-  4. Check if `available_seats >= tickets_booked`. If insufficient, return `400 Bad Request` (Sold Out).
+* **Business Rules:**
+  1. Find the event by `event_id`. If not found, return `404 Not Found`.
+  2. If the event's `organizer_id` equals `req.user.id`, return `403 Forbidden` (organizers cannot book their own events).
+  3. If the event `date` has already passed, return `400 Bad Request`.
+  4. Check if `available_seats >= tickets_booked`. If insufficient, return `400 Bad Request` (Sold Out / Insufficient seats).
   5. Calculate `total_price = event.price * tickets_booked`.
-  6. Decrement `available_seats` on the event and insert the booking record.
-  7. Run `COMMIT` and release client.
+  6. Decrement `available_seats` on the event and insert the booking record with status `confirmed`.
 * **Success Response (201 Created):**
   ```json
   {
@@ -332,10 +368,11 @@
     }
   }
   ```
+* **Error Cases:** `400` validation failure / insufficient seats / event already passed · `401` · `403` organizer booking own event · `404` event not found
 
 #### 9. Get User Bookings
 * **Endpoint:** `GET /api/v1/bookings`
-* **Access:** Protected (Returns all ticket bookings for the authenticated user from `req.user.id`)
+* **Access:** Protected (any authenticated user; returns only the bookings of `req.user.id`, newest first)
 * **Success Response (200 OK):**
   ```json
   {
@@ -358,14 +395,17 @@
     ]
   }
   ```
+  > 💡 This endpoint is not paginated, so there is no `meta` object. An empty list returns `200` with `"data": []`.
+* **Error Cases:** `401` missing/invalid token
 
 #### 10. Cancel Booking
 * **Endpoint:** `PATCH /api/v1/bookings/:id/cancel`
-* **Access:** Protected (Authenticated attendee who owns the booking)
+* **Access:** Protected (any authenticated user, attendee or organizer, who owns the booking)
 * **Business Rules:**
-  1. Verify booking exists and belongs to user (`req.user.id`). If missing, return `404 Not Found`. If unauthorized, return `403 Forbidden`.
-  2. Check if status is already `cancelled`. If so, return `409 Conflict`.
-  3. Inside a database transaction, update booking status to `cancelled` and atomically restore `tickets_booked` back to the event's `available_seats`.
+  1. Find the booking. If it does not exist, return `404 Not Found`. If it exists but `attendee_id` is not `req.user.id`, return `403 Forbidden`.
+  2. If the booking status is already `cancelled`, return `409 Conflict`.
+  3. If the event `date` has already passed, return `400 Bad Request` (a booking cannot be cancelled after the event has started).
+  4. Update the booking status to `cancelled` and add `tickets_booked` back to the event's `available_seats`.
 * **Success Response (200 OK):**
   ```json
   {
@@ -383,29 +423,7 @@
     }
   }
   ```
-
-#### 11. Get Organizer Event Bookings
-* **Endpoint:** `GET /api/v1/organizer/bookings`
-* **Access:** Protected (`organizer` role only)
-* **Description:** Retrieve all ticket bookings across all events created by the logged-in organizer.
-* **Success Response (200 OK):**
-  ```json
-  {
-    "success": true,
-    "message": "Organizer bookings retrieved successfully",
-    "data": [
-      {
-        "id": 1,
-        "event_id": 1,
-        "attendee_id": 2,
-        "tickets_booked": 2,
-        "total_price": "3000.00",
-        "status": "confirmed",
-        "created_at": "2026-11-15T11:15:00.000Z"
-      }
-    ]
-  }
-  ```
+* **Error Cases:** `400` invalid id / event already passed · `401` · `403` booking belongs to another user · `404` booking not found · `409` already cancelled
 
 ---
 
@@ -420,43 +438,52 @@
     "data": {}
   }
   ```
+  > `meta` is included **only** on paginated endpoints (currently only `GET /api/v1/events`).
 * **Standard Error Response Structure:**
   ```json
   {
     "success": false,
     "message": "Validation Error",
-    "errors": [{ "field": "tickets_booked", "message": "Insufficient available seats for this event" }]
+    "errors": [{ "field": "tickets_booked", "message": "Must be at least 1" }]
   }
   ```
+  > Business-rule failures (for example sold out, or deletion blocked) return a clear `message` such as `"Insufficient available seats for this event"`. The `errors` array is optional for them. Never expose stack traces or raw SQL errors.
 * **HTTP Status Codes Reference:**
   * `200 OK`: Successful `GET`, `PATCH`, `DELETE` requests.
   * `201 Created`: Successful `POST` request resulting in resource creation.
-  * `400 Bad Request`: Zod validation failure, invalid input, or sold-out event / deletion prohibited due to active bookings.
+  * `400 Bad Request`: Zod validation failure, invalid input, sold-out/insufficient seats, booking or cancelling for an event that already passed, `total_seats` lower than tickets sold, or deletion prohibited due to active bookings.
   * `401 Unauthorized`: Missing, expired, or invalid JWT token.
-  * `403 Forbidden`: Valid token but insufficient role permissions or attempting to access resources owned by another user.
+  * `403 Forbidden`: Valid token but insufficient role permissions, an organizer booking their own event, or attempting to access/modify resources owned by another user.
   * `404 Not Found`: Requested resource (`event`, `booking`, `user`) does not exist.
-  * `409 Conflict`: Duplicate unique email/ISBN or conflicting state (e.g., cancelling an already cancelled booking).
+  * `409 Conflict`: Duplicate unique email, or conflicting state (e.g., cancelling an already cancelled booking).
   * `500 Internal Server Error`: Unexpected server or database failure.
 
 ---
 
 ## 📂 Production-Ready Folder Structure
 
-Your project must strictly follow the **feature-based layered architecture** (`route` → `controller` → `service`):
+Your project must strictly follow the **feature-based layered architecture** (`route` → `controller` → `service` → `repository`):
 
 ```text
-src/
-├── app.ts
-├── server.ts
-├── config/
-├── middleware/
-├── utils/
-└── modules/
-    ├── auth/
-    ├── event/
-    └── booking/
-
+.
+├── schema.sql
+├── .env.example
+├── README.md
+├── package.json
+├── tsconfig.json
+└── src/
+    ├── app.ts
+    ├── server.ts
+    ├── config/
+    ├── middleware/
+    ├── utils/
+    └── modules/
+        ├── auth/
+        ├── event/
+        └── booking/
 ```
+
+Each module contains its own `route`, `controller`, `service`, `repository` and Zod validation schema files.
 
 ---
 
@@ -473,7 +500,7 @@ src/
 * Use your smartphone selfie camera or laptop webcam in **landscape (horizontal) mode**.
 * Record in a **well-lit, quiet room** with your **face fully visible** throughout the video.
 * Select and answer **any 2 questions** from the list above.
-* Keep each answer between **2–4 minutes**. Speak naturally from your understanding — avoid reading verbatim from notes or scripts.
+* Keep each answer between **2–4 minutes**. Speak naturally from your understanding. Avoid reading verbatim from notes or scripts.
 * Upload your video to **Google Drive** (set access to *"Anyone with the link"*) or **YouTube (Unlisted)**, and include the public link in your submission and `README.md`.
 
 ---
@@ -482,7 +509,7 @@ src/
 
 ### 1️⃣ Codebase & Documentation Requirements
 * **Strict Specification Adherence:** Follow exact endpoint paths, HTTP methods, `snake_case` keys, and response structures.
-* **Database Schema File (`schema.sql`):** Include a `schema.sql` file in your project root containing the `CREATE TABLE` statements so evaluators can set up your tables immediately.
+* **Database Schema File (`schema.sql`):** Write your own `schema.sql` in the project root containing the `CREATE TABLE` statements (with all constraints described in the schema section) so evaluators can set up your tables immediately.
 * **API Documentation (`README.md`):** Include a well-structured `README.md` with project overview, live deployment URL, setup instructions, environment variable example (`.env.example`), interview video link, and complete API endpoint documentation.
 
 ### 2️⃣ Deployment Requirements
@@ -497,8 +524,12 @@ src/
 ```
 > 💡 **Pro Tips:** Ensure your repository has **at least 10 meaningful commits** showing progressive development. Double-check all links in an incognito window before submitting.
 
+### 4️⃣ Deadline & Marking
+* **Due date:** *to be announced by the instructor*
+* **Marks distribution:** *to be announced by the instructor*
+
 ---
 
 ## ⚠️ Academic Integrity Policy
 * **Plagiarism will not be tolerated.** All submissions must be your original work.
-* Any instance of copied repositories or AI-generated verbatim scripts during the video interview will result in **0 Marks**.
+* Copied repositories, or interview answers read out verbatim from AI-generated or other pre-written scripts, will result in **0 Marks**. You may be asked to explain any part of your code.
