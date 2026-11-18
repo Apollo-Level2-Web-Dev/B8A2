@@ -21,7 +21,7 @@
 | **Raw SQL** | Parameterized queries (`pool.query($1, $2)`) mandatory for every database operation to completely prevent SQL injection. Never concatenate user input into SQL. |
 | **bcrypt** | Password hashing (salt rounds between 8 and 12) |
 | **jsonwebtoken** | JWT generation & verification |
-| **Zod** | Request body, query parameter and path parameter validation via custom validation middleware |
+| **Zod (Optional)** | Request body, query parameter and path parameter validation via custom validation middleware |
 | **Error Handling** | Centralized error-handling middleware utilizing a custom `AppError` class |
 
 ---
