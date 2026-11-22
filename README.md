@@ -103,7 +103,7 @@
 #### 1. User Registration
 - **Endpoint:** `POST /api/v1/auth/signup`
 - **Access:** Public
-- **Request Body (Zod Validated):** `role` is optional and defaults to `attendee` when omitted. Only `attendee` and `organizer` are accepted.
+- **Request Body:** `role` is optional and defaults to `attendee` when omitted. Only `attendee` and `organizer` are accepted.
   ```json
   {
     "name": "Sarah Connor",
@@ -160,8 +160,6 @@
 ---
 
 ### 🔹 Events Module
-
-> 📌 **Canonical event shape:** every endpoint that returns an event uses the same fields: `id, title, description, category, date, location, total_seats, available_seats, price, organizer_id, created_at, updated_at`. `price` and other decimal values are returned as **strings** with 2 decimals (the default `pg` behavior for `NUMERIC`), while request bodies send `price` as a **number**.
 
 #### 3. Create Event
 - **Endpoint:** `POST /api/v1/events`
