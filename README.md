@@ -453,24 +453,30 @@
 
 ## 📂 Production-Ready Folder Structure
 
-Your project must strictly follow the **feature-based layered architecture** (`route` → `controller` → `service` → `repository`):
+Example structure for a **feature-based layered/moduler architecture** (`route` → `controller` → `service` → `repository`). Adjust or add files as needed:
 
 ```text
 ├── README.md
-├── schema.sql
+├── package.json
+├── tsconfig.json
 └── src/
     ├── app.ts
     ├── server.ts
     ├── config/
+    │   ├── db.ts
+    │   └── env.ts
     ├── middleware/
+    │   ├── auth.middleware.ts
+    │   └── error.middleware.ts
     ├── utils/
     └── modules/
         ├── auth/
         ├── event/
         └── booking/
+
 ```
 
-Each module contains its own `route`, `controller`, `service`, `repository` and Zod validation schema files.
+Each module contains its own `route`, `controller`, `service`, and other nedded files.
 
 ---
 
