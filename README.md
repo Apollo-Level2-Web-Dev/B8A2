@@ -512,8 +512,11 @@ Each module contains its own `route`, `controller`, `service`, `repository` and 
 > 💡 **Pro Tips:** Ensure your repository has **at least 10 meaningful commits** showing progressive development. Double-check all links in an incognito window before submitting.
 
 ### 4️⃣ Deadline & Marking
-- **Due date:** *to be announced by the instructor*
-- **Marks distribution:** *to be announced by the instructor*
+
+* **Assignment Release:** November 26, 2026 – *8:00 PM (Thursday)*
+* **60 Marks Deadline:** December 02, 2026 – *11:59 PM (Wednesday)*
+* **50 Marks Deadline:** December 03, 2026 – *11:59 PM (Thursday)*
+* **30 Marks Deadline:** December 03, 2026 (*after 11:59 PM*) to December 24, 2026 – *before 11:59 PM (Next 21 Days)*
 
 ---
 
