@@ -15,7 +15,7 @@
 | :--- | :--- |
 | **Node.js** | LTS runtime (22.x or 24.x) |
 | **TypeScript** | Strict mode enabled (`strict: true`, which includes `noImplicitAny`), latest stable version |
-| **Express.js** | Feature-based (modular) & Layered architecture (`route` → `controller` → `service` → `repository`). The repository layer is **mandatory** and is the only layer that runs SQL. |
+| **Express.js** | Feature-based (modular) & Layered architecture (`route` → `controller` → `service` → `repository`). The repository layer is **optional** |
 | **Express Version** | **Express 5.x** |
 | **PostgreSQL** | Relational database using native `pg` (`Pool`) driver. **No ORMs allowed.** |
 | **Raw SQL** | Parameterized queries (`pool.query($1, $2)`) mandatory for every database operation to completely prevent SQL injection. Never concatenate user input into SQL. |
