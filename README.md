@@ -502,7 +502,6 @@ Each module contains its own `route`, `controller`, `service`, and other nedded 
 
 ### 1️⃣ Codebase & Documentation Requirements
 - **Strict Specification Adherence (Zero-Mark Warning):** You must follow the exact API endpoint paths, HTTP methods, access criteria, headers, request body structure, and response body structure specified in this document. Any deviation will cause automated evaluation tests to fail and result in **0 Marks**.
-- **Database Schema File (`schema.sql`):** Write your own `schema.sql` in the project root containing the `CREATE TABLE` statements (with all constraints described in the schema section) so evaluators can set up your tables immediately.
 - **API Documentation (`README.md`):** Include a well-structured `README.md` with project overview, live deployment URL, setup instructions, environment variable example (`.env.example`), interview video link, and complete API endpoint documentation.
 
 ### 2️⃣ Deployment Requirements
